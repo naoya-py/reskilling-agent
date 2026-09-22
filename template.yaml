@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  AI実践研修 エージェント（第4回時点）。FastAPI のコンテナを Lambda（関数 URL 付き）で動かす。
+  AI実践研修 エージェント（第5回時点）。FastAPI のコンテナを Lambda（関数 URL 付き）で動かし、Bedrock（Nova Lite）を呼ぶ。
   すべてのリソース名は StudentId で始まる。**すべて DeletionPolicy: Delete。**
   スタックを消せば跡形も残らない（ECR と作業用 S3 は別。03-デプロイ手順書 §5）。
 
@@ -19,6 +19,11 @@ Parameters:
     Type: String
     Default: AI実践研修 エージェント
     Description: 画面の上に出す名前。ここを変えて再デプロイすると、コードを触らずに画面が変わる
+
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-lite-v1:0
+    Description: 使う LLM。安いものに固定する。IAM の権限もこのモデル1つに絞られる（第5回）
 
 Globals:
   Function:
@@ -61,6 +66,11 @@ Resources:
           LOG_LEVEL: INFO
           # 鍵そのものではなく「鍵の名前」だけを渡す。値は Secrets Manager から実行時に読む
           DEMO_API_KEY_SECRET_NAME: !Sub '${StudentId}/demo-api-key'
+          # --- 第5回：LLM ---
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          # 公開 URL の裏に LLM がある。1回の応答の上限をここで持つ（app/config.py の max_tokens）
+          MAX_TOKENS: '1024'
+          TEMPERATURE: '0.3'
       FunctionUrlConfig:
         # NONE ＝ 誰でも開ける公開 URL。第4回の中身は「受け取った文字を返す」だけなので、
         # 公開しても失うものが無い。LLM を載せる第5回で見直す
@@ -72,6 +82,13 @@ Resources:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${StudentId}/demo-api-key-*'
+        # --- 第5回：Bedrock ---
+        # 「Bedrock を呼ぶ」ではなく「このモデルだけを呼ぶ」まで絞る。
+        # コードが高いモデルに切り替わっても権限が無いので呼べない ＝ 事故の上限になる
+        - Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}'
       Tags:
         Project: reskilling
         Owner: !Ref StudentId

@@ -9,14 +9,15 @@ FastAPI のふつうのウェブアプリ。第4回で Docker に入れて AWS L
 """
 
 import logging
-import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from botocore.exceptions import ClientError
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.llm import ask
 from app.logging_conf import setup_logging
 from app.secrets import demo_api_key
 
@@ -71,15 +72,35 @@ def index() -> str:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
-    """第3回時点では、受け取った文字をそのまま返す。
-
-    第5回で、この中身を Bedrock の呼び出しに差し替える。
-    受け取る形・返す形・記録する、の3つを先に作っておくのがこの回の目的。
-    """
-    started = time.monotonic()
+    """受け取った文章を LLM に送り、答えを返す。第5回は1問1答。"""
     logger.info("chat request received", extra={"extra_fields": {"chars": len(req.message), "session_id": req.session_id}})
-    reply = f"受け取りました: {req.message}"
-    return ChatResponse(reply=reply, elapsed_ms=int((time.monotonic() - started) * 1000))
+
+    try:
+        result = ask(req.message)
+    except ClientError as e:
+        # AWS が返してきたエラー。権限不足・モデル未有効化・混雑など。
+        # 中身をそのまま画面に出すと情報が漏れるので、ログには全部、画面には種別だけ
+        code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.exception("bedrock call failed", extra={"extra_fields": {"error_code": code}})
+        if code == "ThrottlingException":
+            raise HTTPException(status_code=429, detail="混み合っています。少し待って再送してください") from e
+        raise HTTPException(status_code=502, detail=f"モデルの呼び出しに失敗しました（{code}）") from e
+
+    logger.info("chat request completed", extra={"extra_fields": {
+        "input_tokens": result["input_tokens"],
+        "output_tokens": result["output_tokens"],
+        "stop_reason": result["stop_reason"],
+        "elapsed_ms": result["elapsed_ms"],
+    }})
+
+    return ChatResponse(
+        reply=result["reply"],
+        turns=1,
+        input_tokens=result["input_tokens"],
+        output_tokens=result["output_tokens"],
+        elapsed_ms=result["elapsed_ms"],
+        model=settings.bedrock_model_id,
+    )
 
 
 @app.get("/api/suggestions")
