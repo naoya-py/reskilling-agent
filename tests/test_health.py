@@ -1,15 +1,16 @@
-"""器そのもののテスト（第7回版。tests/test_health.py を丸ごと差し替える）。
+"""器そのもののテスト（第8回版。tests/test_health.py を丸ごと差し替える）。
 
 **ネットワークには一切出ない。**エージェントを回す run_agent() と、DynamoDB を読む history.load() を
 偽物に差し替えてから叩く。確かめているのは器：ターン数と tool の名前が画面に返ること、
-tool の往復を含む会話が丸ごと保存されること。tool が失敗したときのテストは午後（4-2）で1つ足す。
+tool の往復を含む会話が丸ごと保存されること。
+第8回で2件増えて 11 件になる。MCP サーバーにも繋ぎにいかない（mcp_client を偽物に差し替える）。
 """
 
 from fastapi.testclient import TestClient
 
-from app import history
+from app import history, mcp_client
 from app.main import app
-from app.tools import run_tool
+from app.tools import all_tool_specs, run_tool
 
 client = TestClient(app)
 
@@ -94,3 +95,42 @@ def test_chat_rejects_empty_message():
 def test_chat_rejects_too_long_message():
     res = client.post("/api/chat", json={"message": "あ" * 4001})
     assert res.status_code == 422
+
+
+def test_run_tool_does_not_raise_on_failure():
+    """ tool が失敗しても例外を外に出さず、error を結果として返すこと。
+
+    例外が外に出ると、tool が1つ壊れただけで会話全体が HTTP 500 で落ちる（4-1 で見たもの）。
+    error を返せば、モデルはそれを読んで謝るか、別の言い方を試せる。
+    """
+    assert "error" in run_tool("get_current_time", {"timezone": 999})   # 引数が変
+    assert "error" in run_tool("get_weather", {})                       # 無い tool
+
+
+# ---------- 第8回で増えたもの ----------
+
+def test_mcp_tools_are_added_to_local_ones(monkeypatch):
+    """MCP サーバーの一覧が、手元の一覧の後ろに足されること。
+
+    モデルに渡る toolConfig は1つの配列で、手元のものと MCP のものが並んでいる。
+    **モデルの側にはどちらがどちらか分からない。**振り分けるのは agent.py の仕事。
+    """
+    fake = [
+        {"toolSpec": {"name": "search_mail", "description": "Gmail を検索する",
+                      "inputSchema": {"json": {"type": "object", "properties": {}}}}},
+        {"toolSpec": {"name": "list_events", "description": "カレンダーの予定を返す",
+                      "inputSchema": {"json": {"type": "object", "properties": {}}}}},
+    ]
+    monkeypatch.setattr(mcp_client, "list_tools", lambda: fake)
+    names = [t["toolSpec"]["name"] for t in all_tool_specs() + mcp_client.list_tools()]
+    assert names == ["get_current_time", "search_mail", "list_events"]
+
+
+def test_mcp_failure_does_not_break_local_tools(monkeypatch):
+    """MCP サーバーに繋がらなくても、手元の tool は使えること。
+
+    繋がらなかった1台のために、時刻を聞くだけの用事まで止める理由はない。
+    """
+    monkeypatch.setattr(mcp_client, "list_tools", lambda: [])
+    assert [t["toolSpec"]["name"] for t in all_tool_specs()] == ["get_current_time"]
+    assert run_tool("get_current_time", {"timezone": "JST"})["timezone"] == "JST"
