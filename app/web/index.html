@@ -376,6 +376,19 @@
     addMessage("ai", "こんにちは。何かお手伝いできることはありますか。\n下のボタンを押すとそのまま質問できます。");
   }
 
+
+  async function showWhereItRuns() {
+    try {
+      const res = await fetch("/healthz");
+      const h = await res.json();
+      window.runningAt = `${h.env} / ${h.student_id}`;
+      document.getElementById("subtitle").textContent = window.runningAt;
+    } catch (_) {
+      // 読めなくても画面は動かす
+    }
+  }
+  showWhereItRuns();
+
   greet();
 </script>
 </body>

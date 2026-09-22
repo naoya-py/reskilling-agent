@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AI実践研修 エージェント（第4回時点）。FastAPI のコンテナを Lambda（関数 URL 付き）で動かす。
+  すべてのリソース名は StudentId で始まる。**すべて DeletionPolicy: Delete。**
+  スタックを消せば跡形も残らない（ECR と作業用 S3 は別。03-デプロイ手順書 §5）。
+
+# ----------------------------------------------------------------------------
+# 差し替えたい値はここに集める。コードやリソース定義に直接書かない。
+# 値は samconfig.toml の parameter_overrides から渡ってくる
+# ----------------------------------------------------------------------------
+Parameters:
+  StudentId:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9]*-2610$'
+    Description: 受講者 ID。すべてのリソース名の先頭に付く（第1回 04 の命名規則）
+
+  AppName:
+    Type: String
+    Default: AI実践研修 エージェント
+    Description: 画面の上に出す名前。ここを変えて再デプロイすると、コードを触らずに画面が変わる
+
+Globals:
+  Function:
+    # 1リクエストで積み上がるコストの上限。15分にしない
+    Timeout: 30
+    MemorySize: 512
+    # 全員 x86_64 に揃える。Dockerfile の --platform=linux/amd64 と対にする
+    Architectures: [x86_64]
+
+Resources:
+
+  # --- ログ ------------------------------------------------------------------
+  # 自分で作る。Lambda に任せると保持期間が「無期限」になり、ずっと課金され続ける
+  AgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${StudentId}-agent'
+      RetentionInDays: 7
+
+  # --- アプリ本体 ------------------------------------------------------------
+  AgentFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: AgentLogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub '${StudentId}-agent'
+      Description: >-
+        FastAPI + Lambda Web Adapter。Handler を書かないのは、コンテナの CMD（uvicorn）が
+        そのまま動くため。Lambda のイベントと HTTP の変換は /opt/extensions/lambda-adapter が行う
+      PackageType: Image
+      # 手元の .env に相当するもの。Lambda は .env を読まない（.dockerignore で入れていない）
+      Environment:
+        Variables:
+          STUDENT_ID: !Ref StudentId
+          APP_ENV: aws
+          APP_NAME: !Ref AppName
+          LOG_LEVEL: INFO
+          # 鍵そのものではなく「鍵の名前」だけを渡す。値は Secrets Manager から実行時に読む
+          DEMO_API_KEY_SECRET_NAME: !Sub '${StudentId}/demo-api-key'
+      FunctionUrlConfig:
+        # NONE ＝ 誰でも開ける公開 URL。第4回の中身は「受け取った文字を返す」だけなので、
+        # 公開しても失うものが無い。LLM を載せる第5回で見直す
+        AuthType: NONE
+        InvokeMode: BUFFERED
+      Policies:
+        # Secrets Manager は「この1件だけ」読める。名前の末尾に AWS が付ける6文字ぶんを * にする
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${StudentId}/demo-api-key-*'
+      Tags:
+        Project: reskilling
+        Owner: !Ref StudentId
+    Metadata:
+      DockerContext: .
+      Dockerfile: Dockerfile
+      DockerTag: !Sub '${StudentId}-latest'
+
+  # --- 関数 URL を誰でも呼べるようにする許可 ----------------------------------
+  # AuthType: NONE と書いただけでは呼べない。「誰が呼べるか」の許可を2つ足す。
+  # 2025年10月から、InvokeFunctionUrl と InvokeFunction の両方が要る。
+  # どちらが欠けても返るのは同じ 403 Forbidden なので、片方だけ付けて詰まる。
+  AgentFunctionUrlPublicPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AgentFunction.Arn
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      # この行が要。付け忘れると「IAM 署名があれば誰でも」という別の意味になる
+      FunctionUrlAuthType: NONE
+
+  AgentFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AgentFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      # 「関数 URL 経由のときだけ」に限定する。無いと AWS の API から直接呼ぶことまで誰にでも許す
+      InvokedViaFunctionUrl: true
+
+# ----------------------------------------------------------------------------
+# デプロイが終わったあとに表示される値。公開 URL はここで分かる
+# ----------------------------------------------------------------------------
+Outputs:
+  FunctionUrl:
+    Description: 公開 URL。ブラウザで開くと第3回に作った自分の画面が出る
+    Value: !GetAtt AgentFunctionUrl.FunctionUrl
+
+  FunctionName:
+    Description: Lambda 関数の名前。aws logs tail で使う
+    Value: !Ref AgentFunction
+
+  LogGroupName:
+    Description: ログの置き場。aws logs tail <この名前> --follow
+    Value: !Ref AgentLogGroup

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.logging_conf import setup_logging
+from app.secrets import demo_api_key
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -52,8 +53,14 @@ class ChatResponse(BaseModel):
 
 @app.get("/healthz")
 def healthz() -> dict:
-    """生きているかの確認用。第4回で AWS がここを叩く。200 を返さないと起動失敗になる。"""
-    return {"status": "ok", "env": settings.app_env, "student_id": settings.student_id}
+    """生きているかの確認用。第4回から AWS がここを叩く。200 を返さないと起動失敗になる。"""
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "student_id": settings.student_id,
+        "app_name": settings.app_name,
+        "api_key_set": bool(demo_api_key()),
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
