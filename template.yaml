@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  AI実践研修 エージェント（第5回時点）。FastAPI のコンテナを Lambda（関数 URL 付き）で動かし、Bedrock（Nova Lite）を呼ぶ。
+  AI実践研修 エージェント（第6回時点）。FastAPI のコンテナを Lambda（関数 URL 付き）で動かし、Bedrock（Nova Lite）を呼ぶ。
+  会話履歴は DynamoDB に保存する（第6回）。
   すべてのリソース名は StudentId で始まる。**すべて DeletionPolicy: Delete。**
   スタックを消せば跡形も残らない（ECR と作業用 S3 は別。03-デプロイ手順書 §5）。
 
@@ -71,6 +72,13 @@ Resources:
           # 公開 URL の裏に LLM がある。1回の応答の上限をここで持つ（app/config.py の max_tokens）
           MAX_TOKENS: '1024'
           TEMPERATURE: '0.3'
+          # --- 第6回：会話履歴 ---
+          # 履歴の置き場（DynamoDB のテーブル名）。手元の .env にも同じ名前を書くと、手元と AWS が同じ履歴を読む
+          CONVERSATION_TABLE: !Ref ConversationTable
+          # モデルに送る過去の発言の上限（件数）。多いほど文脈は続くが、毎回の inputTokens が増える
+          MAX_HISTORY_MESSAGES: '20'
+          # 何日で自動的に消すか（DynamoDB の TTL）
+          HISTORY_TTL_DAYS: '7'
       FunctionUrlConfig:
         # NONE ＝ 誰でも開ける公開 URL。第4回の中身は「受け取った文字を返す」だけなので、
         # 公開しても失うものが無い。LLM を載せる第5回で見直す
@@ -89,6 +97,15 @@ Resources:
             - Effect: Allow
               Action: bedrock:InvokeModel
               Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}'
+        # --- 第6回：DynamoDB ---
+        # 「DynamoDB を使う」ではなく「このテーブルの読み書き」まで絞る。Scan（全件読み）も Query も要らない
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt ConversationTable.Arn
       Tags:
         Project: reskilling
         Owner: !Ref StudentId
@@ -96,6 +113,32 @@ Resources:
       DockerContext: .
       Dockerfile: Dockerfile
       DockerTag: !Sub '${StudentId}-latest'
+
+  # --- 会話履歴の置き場（第6回）----------------------------------------------
+  # Lambda は1回ごとに使い捨てられる。関数の中の変数に置いた履歴は次のリクエストでは消えている。
+  # だから外（DynamoDB）に置く。1項目 ＝ 1つの会話（user_id ＋ session_id で1件）
+  ConversationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub '${StudentId}-conversations'
+      # 使った分だけ課金。8人×数日の研修では固定容量にする理由がない
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: user_id,    AttributeType: S }
+        - { AttributeName: session_id, AttributeType: S }
+      KeySchema:
+        # 利用者 ID を鍵の先頭に置く。第6回は全員 anonymous。第14回でログインした人の ID になる
+        - { AttributeName: user_id,    KeyType: HASH }
+        - { AttributeName: session_id, KeyType: RANGE }
+      TimeToLiveSpecification:
+        # expires_at（UNIX 秒）を過ぎた項目を AWS が消す。会話履歴を無期限に貯めない
+        AttributeName: expires_at
+        Enabled: true
+      Tags:
+        - { Key: Project, Value: reskilling }
+        - { Key: Owner,   Value: !Ref StudentId }
 
   # --- 関数 URL を誰でも呼べるようにする許可 ----------------------------------
   # AuthType: NONE と書いただけでは呼べない。「誰が呼べるか」の許可を2つ足す。
@@ -134,3 +177,7 @@ Outputs:
   LogGroupName:
     Description: ログの置き場。aws logs tail <この名前> --follow
     Value: !Ref AgentLogGroup
+
+  ConversationTableName:
+    Description: 会話履歴のテーブル名。手元の .env の CONVERSATION_TABLE に書く（第6回）
+    Value: !Ref ConversationTable
