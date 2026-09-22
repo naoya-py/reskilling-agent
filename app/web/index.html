@@ -202,12 +202,7 @@
     <div class="day" id="today"></div>
   </div>
 
-  <div id="samples">
-    <button type="button">いま何時？</button>
-    <button type="button">今日は何曜日？</button>
-    <button type="button">生成AIのRAGとは何か、3行で説明して</button>
-    <button type="button">議事録のテンプレートを作って</button>
-  </div>
+  <div id="samples"></div>
 
   <form id="form">
     <textarea id="message" rows="1" placeholder="メッセージを入力" autofocus></textarea>
@@ -256,10 +251,21 @@
   }
   document.getElementById("reset").addEventListener("click", resetConversation);
 
-  // 定型質問のボタンを押したら、その場で送る
-  document.querySelectorAll("#samples button").forEach(b => {
-    b.addEventListener("click", () => { box.value = b.textContent; send(); });
-  });
+  // 定型質問のボタンを、サーバの /api/suggestions から作る
+  async function loadSuggestions() {
+    const res = await fetch("/api/suggestions");
+    const items = await res.json();                 // ["いま何時？", ...] という文字列のリスト
+    const bar = document.getElementById("samples");
+    bar.innerHTML = "";
+    for (const text of items) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = text;
+      b.addEventListener("click", () => { box.value = text; send(); });
+      bar.appendChild(b);
+    }
+  }
+  loadSuggestions();
 
   // 入力欄を中身の量に合わせて伸ばす
   box.addEventListener("input", () => {

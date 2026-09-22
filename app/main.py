@@ -73,3 +73,14 @@ def chat(req: ChatRequest) -> ChatResponse:
     logger.info("chat request received", extra={"extra_fields": {"chars": len(req.message), "session_id": req.session_id}})
     reply = f"受け取りました: {req.message}"
     return ChatResponse(reply=reply, elapsed_ms=int((time.monotonic() - started) * 1000))
+
+
+@app.get("/api/suggestions")
+def suggestions() -> list[str]:
+    """画面の定型質問ボタン。ここを変えると、画面のボタンが変わる（3-2 で画面側をつなぐ）。"""
+    return [
+        "いま何時？",
+        "今日は何曜日？",
+        "生成AIのRAGとは何か、3行で説明して",
+        "議事録のテンプレートを作って",
+    ]
