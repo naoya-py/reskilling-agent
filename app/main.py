@@ -12,10 +12,13 @@ import logging
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from typing import Any
+
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from app.auth import current_user
 from app.config import settings
 from app.logging_conf import setup_logging
 
@@ -58,18 +61,55 @@ def healthz() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    """画面。app/web/index.html をそのまま返す。"""
-    return (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    """画面を返す。ただし**手元で動かしているときだけ。**
+
+    第4回で AWS に載せると、画面は S3 に置いて CloudFront から配るようになる
+    （deploy_web.py が置く）。Lambda が返すのは API だけになり、
+    画面を見るだけの人が Lambda を起こさなくなる。コールドスタートも課金も減る。
+
+    間違ってこちらを開いた人が迷わないよう、案内だけ返しておく。
+    """
+    if settings.app_env == "local":
+        return (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    return (
+        "<!doctype html><html lang='ja'><meta charset='utf-8'>"
+        "<title>API の入口</title>"
+        "<body style='font-family:system-ui,sans-serif;max-width:36em;margin:15vh auto;"
+        "padding:0 1.5em;line-height:1.8;color:#333'>"
+        "<h1 style='font-size:1.1rem'>ここは API の入口です</h1>"
+        "<p>画面は CloudFront から配られています。"
+        "スタックの出力 <code>WebUrl</code> の URL を開いてください。</p>"
+        "<p style='color:#777;font-size:.9em'>"
+        "<code>GET /healthz</code> ／ <code>POST /api/chat</code>（要ログイン）</p>"
+        "</body></html>"
+    )
+
+
+@app.get("/config.json", include_in_schema=False)
+def config() -> dict:
+    """画面が「いま手元か、AWS か」を見分けるための設定。
+
+    **手元には設定が無いので、空を返す。**画面は空を受け取るとローカルと判断し、
+    ログインを求めない。第4回で AWS に載せると、この設定は S3 に置かれて
+    CloudFront から配られる（deploy_web.py が書き出す）ので、ここは通らない。
+
+    空でも 200 を返すのが肝。404 にすると、ブラウザのコンソールに赤い行が残る。
+    """
+    return {}
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, user: dict[str, Any] = Depends(current_user)) -> ChatResponse:
     """第3回時点では、受け取った文字をそのまま返す。
 
     第5回で、この中身を Bedrock の呼び出しに差し替える。
     受け取る形・返す形・記録する、の3つを先に作っておくのがこの回の目的。
+
+    **Depends(current_user) が先に動く。**ログインしていなければ 401 でここまで来ない。
+    手元（app_env が local）では require_auth が False なので素通しする。
     """
     started = time.monotonic()
-    logger.info("chat request received", extra={"extra_fields": {"chars": len(req.message), "session_id": req.session_id}})
+    logger.info("chat request received", extra={"extra_fields": {
+        "chars": len(req.message), "session_id": req.session_id, "user": user.get("sub", "")}})
     reply = f"受け取りました: {req.message}"
     return ChatResponse(reply=reply, elapsed_ms=int((time.monotonic() - started) * 1000))

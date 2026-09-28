@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>AI実践研修 エージェント</title>
+  <!-- タブのアイコン。置かないとブラウザが favicon.ico を探しに行き、コンソールに 404 が残る -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%2300c853'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='%23fff' text-anchor='middle'%3EAI%3C/text%3E%3C/svg%3E">
   <style>
     /* -----------------------------------------------------------------
        チャット画面。ライブラリは使わず、CSS だけで作ってある。
@@ -178,6 +180,31 @@
     }
     #send:disabled { opacity: .4; cursor: default; }
     #send svg { width: 20px; height: 20px; }
+
+    /* --- ログインしていないときの画面（第4回から出る）--- */
+    #gate {
+      position: fixed; inset: 0; z-index: 10; background: var(--room);
+      display: grid; place-items: center; padding: 24px;
+    }
+    [hidden] { display: none !important; }
+    .gate-card {
+      background: var(--bubble-ai); color: var(--bubble-ai-fg);
+      border-radius: 16px; padding: 32px 28px; max-width: 380px; width: 100%;
+      text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,.18);
+    }
+    .gate-icon {
+      width: 52px; height: 52px; border-radius: 50%; background: var(--send); color: #fff;
+      display: grid; place-items: center; font-size: 20px; font-weight: 700; margin: 0 auto 16px;
+    }
+    .gate-card h1 { font-size: 17px; margin: 0 0 8px; }
+    .gate-card p { font-size: 13px; line-height: 1.7; margin: 0 0 20px; opacity: .8; }
+    .gate-card #login {
+      font: inherit; font-size: 15px; cursor: pointer; width: 100%;
+      background: var(--send); color: #fff; border: 0; padding: 12px; border-radius: 10px;
+    }
+    .gate-card .gate-note { font-size: 11px; margin: 16px 0 0; opacity: .55; }
+    .gate-card.error .gate-icon { background: #d9534f; }
+    #whoami { font-size: 12px; opacity: .7; margin-right: 8px; }
   </style>
 </head>
 <body>
@@ -194,9 +221,22 @@
       <div class="desc" id="subtitle">ローカル / echo</div>
     </div>
     <div class="head-right">
+      <span id="whoami"></span>
       <button type="button" id="reset">新しい会話</button>
+      <button type="button" id="logout" hidden>ログアウト</button>
     </div>
   </header>
+
+  <!-- ログインしていない間だけ出る。手元（uvicorn）では出ない -->
+  <div id="gate" hidden>
+    <div class="gate-card">
+      <div class="gate-icon">AI</div>
+      <h1>AI実践研修 エージェント</h1>
+      <p id="gate-msg">利用するにはログインが必要です。</p>
+      <button type="button" id="login">ログイン</button>
+      <p class="gate-note">アカウントは自分で作ります。誰でも登録できる設定にはしていません。</p>
+    </div>
+  </div>
 
   <div id="log">
     <div class="day" id="today"></div>
@@ -215,6 +255,173 @@
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.2 21.2 23 12 2.2 2.8l-.1 7.2L17 12 2.1 14z"/></svg>
     </button>
   </form>
+
+<script>
+  // ===================================================================
+  // ログイン（Cognito / 認可コード ＋ PKCE）
+  //
+  // **手元で動かしているときは、ここは何もしない。**config.json が無いためローカルと判断する。
+  // 第4回で AWS に載せると config.json が置かれ、ログインが要るようになる。
+  //
+  // ブラウザで動くアプリに秘密鍵は持たせられない。開発者ツールで見えてしまう。
+  // そこで PKCE を使う。
+  //   1. 合言葉（code_verifier）をその場で作り、手元に隠しておく
+  //   2. そのハッシュ（code_challenge）だけを Cognito に渡してログイン画面へ飛ぶ
+  //   3. 戻ってきた引換券（code）と、隠しておいた合言葉を一緒に出してトークンをもらう
+  // 引換券だけ横取りされても、合言葉が無いのでトークンには換えられない。
+  // ===================================================================
+
+  let CFG = null;          // config.json（deploy_web.py が書き出す）。手元では null のまま
+  let LOCAL = false;       // 手元で動かしているか
+
+  // API の宛先。**画面から API を呼ぶところは、必ずこれを頭に付ける。**
+  //   手元 : 空文字。同じサーバなので `/api/chat` がそのまま届く
+  //   AWS  : config.json が指す Lambda。画面は CloudFront から配られるので、相対パスでは届かない
+  const apiBase = () => (CFG ? CFG.apiBase : "");
+  const KEY = "s00.auth";  // トークンの保管場所の名前
+
+  const store = {
+    get()  { try { return JSON.parse(sessionStorage.getItem(KEY) || "null"); } catch { return null; } },
+    set(v) { try { sessionStorage.setItem(KEY, JSON.stringify(v)); } catch {} },
+    clear(){ try { sessionStorage.removeItem(KEY); } catch {} },
+  };
+
+  const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const sha256 = (s) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  const randomString = (len = 64) => {
+    const a = new Uint8Array(len); crypto.getRandomValues(a);
+    return Array.from(a, b => "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"[b % 66]).join("");
+  };
+
+  async function startLogin() {
+    const verifier = randomString();
+    const state = randomString(24);
+    sessionStorage.setItem("s00.pkce", verifier);
+    sessionStorage.setItem("s00.state", state);
+    const q = new URLSearchParams({
+      client_id: CFG.clientId, response_type: "code",
+      scope: "openid email profile", redirect_uri: CFG.redirectUri,
+      state, code_challenge: b64url(await sha256(verifier)), code_challenge_method: "S256",
+    });
+    location.assign(`${CFG.cognitoDomain}/oauth2/authorize?${q}`);
+  }
+
+  function logout() {
+    store.clear();
+    const q = new URLSearchParams({ client_id: CFG.clientId, logout_uri: CFG.redirectUri });
+    location.assign(`${CFG.cognitoDomain}/logout?${q}`);
+  }
+
+  async function exchangeToken(body) {
+    const res = await fetch(`${CFG.cognitoDomain}/oauth2/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(body),
+    });
+    if (!res.ok) throw new Error("トークンを取得できませんでした（" + res.status + "）");
+    const t = await res.json();
+    const s = store.get() || {};
+    store.set({
+      idToken: t.id_token,
+      refreshToken: t.refresh_token || s.refreshToken,
+      // 少し早めに切れた扱いにする。境目ちょうどで失敗するのを避ける
+      expiresAt: Date.now() + (t.expires_in - 60) * 1000,
+    });
+  }
+
+  // **画面のどこからでも、送信の直前にこれを呼ぶ。**期限が近ければ静かに取り直す
+  async function getIdToken() {
+    if (LOCAL) return null;
+    const s = store.get();
+    if (s && s.idToken && Date.now() < s.expiresAt) return s.idToken;
+    if (!s || !s.refreshToken) { store.clear(); return null; }
+    try {
+      await exchangeToken({ grant_type: "refresh_token", client_id: CFG.clientId, refresh_token: s.refreshToken });
+      return store.get().idToken;
+    } catch { store.clear(); return null; }
+  }
+
+  function claimsOf(idToken) {
+    try { return JSON.parse(atob(idToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); }
+    catch { return {}; }
+  }
+
+  function showGate(message, isError) {
+    const gate = document.getElementById("gate");
+    gate.hidden = false;
+    if (message) document.getElementById("gate-msg").textContent = message;
+    gate.querySelector(".gate-card").classList.toggle("error", !!isError);
+    document.getElementById("login").hidden = !!isError;
+  }
+
+  // どこで失敗しても、白い画面や無反応で終わらせない
+  window.addEventListener("unhandledrejection", (e) => {
+    if (!LOCAL) showGate("エラーが発生しました: " + (e.reason?.message || e.reason), true);
+  });
+
+  async function boot() {
+    // 設定はデプロイのときに書き出される（deploy_web.py）。コードに埋め込まない。
+    // **手元には無い。**読めなければローカルと判断して、ログインを求めない。
+    // fetch は 404 でも例外を投げない。さらに FastAPI の 404 は {"detail":"Not Found"} という
+    // 正しい JSON を返すので、json() も通ってしまう。**res.ok と中身の両方を見る。**
+    try {
+      const res = await fetch("./config.json", { cache: "no-store" });
+      if (!res.ok) throw new Error("config.json がない");
+      const cfg = await res.json();
+      if (!cfg || !cfg.cognitoDomain) throw new Error("config.json の中身がない");
+      CFG = cfg;   // **中身を確かめてから入れる。**手元では null のままにする（下の送信先の判定がこれを見る）
+    } catch {
+      LOCAL = true;
+      onReady();
+      return;
+    }
+
+    document.getElementById("login").addEventListener("click", async () => {
+      try { await startLogin(); }
+      catch (e) { showGate("ログインを開始できませんでした: " + e, true); }
+    });
+    document.getElementById("logout").addEventListener("click", () => logout());
+
+    // ログイン画面から戻ってきたところ（?code=... が付いている）
+    const url = new URL(location.href);
+    const code = url.searchParams.get("code");
+    if (code) {
+      const verifier = sessionStorage.getItem("s00.pkce");
+      // state が一致しないものは受け取らない（別サイトから踏まされた戻りを弾く）
+      if (url.searchParams.get("state") !== sessionStorage.getItem("s00.state") || !verifier) {
+        showGate("ログインの戻りを確認できませんでした。もう一度お試しください。", false);
+        history.replaceState({}, "", location.pathname);
+        return;
+      }
+      try {
+        await exchangeToken({
+          grant_type: "authorization_code", client_id: CFG.clientId,
+          code, redirect_uri: CFG.redirectUri, code_verifier: verifier,
+        });
+      } catch (e) {
+        showGate(String(e), true); return;
+      } finally {
+        sessionStorage.removeItem("s00.pkce");
+        sessionStorage.removeItem("s00.state");
+        history.replaceState({}, "", location.pathname);   // アドレスバーから code を消す
+      }
+    } else if (url.searchParams.get("error")) {
+      showGate(`ログインできませんでした: ${url.searchParams.get("error_description") || url.searchParams.get("error")}`, false);
+      history.replaceState({}, "", location.pathname);
+      return;
+    }
+
+    const token = await getIdToken();
+    if (!token) { showGate(); return; }
+
+    document.getElementById("gate").hidden = true;
+    document.getElementById("logout").hidden = false;
+    const c = claimsOf(token);
+    document.getElementById("whoami").textContent = c.email || c["cognito:username"] || "";
+    onReady();
+  }
+</script>
 
 <script>
   // ===================================================================
@@ -332,13 +539,29 @@
     const pending = addMessage("ai", "", { typing: true });
 
     try {
-      const res = await fetch("/api/chat", {
+      // 宛先は2つに分かれる。
+      //   手元      : 同じサーバの /api/chat（CFG が無い）
+      //   AWS       : CloudFront から配られた画面が、別ドメインの Lambda を呼ぶ
+      const base = apiBase();
+      const token = await getIdToken();
+      const headers = { "Content-Type": "application/json" };
+      // ログインしているときだけ付ける。手元では付かない
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`${base}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ message, session_id: sessionId() })
       });
       const raw = await res.text();
 
+      if (res.status === 401 && !LOCAL) {
+        // 期限切れ。ためたトークンを捨てて、ログイン画面に戻す
+        store.clear();
+        pending.msg.remove();
+        showGate("ログインの有効期限が切れました。もう一度ログインしてください。", false);
+        return;
+      }
       if (!res.ok) {
         pending.msg.classList.add("err");
         let detail = raw;
@@ -370,7 +593,14 @@
     addMessage("ai", "こんにちは。何かお手伝いできることはありますか。\n下のボタンを押すとそのまま質問できます。");
   }
 
-  greet();
+  // 画面の準備ができたときに、boot() から1回だけ呼ばれる。
+  // **API を呼ぶ処理は、ここから呼ぶ。**これより前は apiBase() の宛先がまだ決まっていない。
+  function onReady() {
+    greet();
+  }
+
+  // **onReady() を直接呼ばない。**ログインの確認が済んでから boot() が呼ぶ
+  boot();
 </script>
 </body>
 </html>

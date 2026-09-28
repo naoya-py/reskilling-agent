@@ -27,5 +27,17 @@ class Settings(BaseSettings):
     # ログの細かさ。INFO / DEBUG / WARNING
     log_level: str = "INFO"
 
+    # 使うリージョン。東京に固定する（第1回 04 の 1-3）
+    aws_region: str = "ap-northeast-1"
+
+    # ---- ログイン（第4回で有効になる）------------------------------------
+    # 手元（uvicorn）では False のまま。ログインせずに画面を触れる。
+    # AWS にデプロイすると template.yaml が True を渡すので、ログインが要るようになる
+    require_auth: bool = False
+
+    # Cognito の2つ。**手では入れない。**template.yaml が Lambda の環境変数で渡す
+    cognito_user_pool_id: str = ""
+    cognito_client_id: str = ""
+
 
 settings = Settings()
