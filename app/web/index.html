@@ -268,6 +268,11 @@
 
   let CFG = null;          // config.json（deploy_web.py が書き出す）。手元では null のまま
   let LOCAL = false;       // 手元で動かしているか
+
+  // API の宛先。**画面から API を呼ぶところは、必ずこれを頭に付ける。**
+  //   手元 : 空文字。同じサーバなので `/api/chat` がそのまま届く
+  //   AWS  : config.json が指す Lambda。画面は CloudFront から配られるので、相対パスでは届かない
+  const apiBase = () => (CFG ? CFG.apiBase : "");
   const KEY = "s00.auth";  // トークンの保管場所の名前
 
   const store = {
@@ -363,7 +368,7 @@
       CFG = cfg;   // **中身を確かめてから入れる。**手元では null のままにする（下の送信先の判定がこれを見る）
     } catch {
       LOCAL = true;
-      greet();
+      onReady();
       return;
     }
 
@@ -409,7 +414,7 @@
     document.getElementById("logout").hidden = false;
     const c = claimsOf(token);
     document.getElementById("whoami").textContent = c.email || c["cognito:username"] || "";
-    greet();
+    onReady();
   }
 </script>
 
@@ -455,7 +460,7 @@
 
   // 定型質問のボタンを、サーバの /api/suggestions から作る
   async function loadSuggestions() {
-    const res = await fetch("/api/suggestions");
+    const res = await fetch(`${apiBase()}/api/suggestions`);
     const items = await res.json();                 // ["いま何時？", ...] という文字列のリスト
     const bar = document.getElementById("samples");
     bar.innerHTML = "";
@@ -467,7 +472,6 @@
       bar.appendChild(b);
     }
   }
-  loadSuggestions();
 
   // 入力欄を中身の量に合わせて伸ばす
   box.addEventListener("input", () => {
@@ -543,7 +547,7 @@
       // 宛先は2つに分かれる。
       //   手元      : 同じサーバの /api/chat（CFG が無い）
       //   AWS       : CloudFront から配られた画面が、別ドメインの Lambda を呼ぶ
-      const base = CFG ? CFG.apiBase : "";
+      const base = apiBase();
       const token = await getIdToken();
       const headers = { "Content-Type": "application/json" };
       // ログインしているときだけ付ける。手元では付かない
@@ -594,10 +598,18 @@
     addMessage("ai", "こんにちは。何かお手伝いできることはありますか。\n下のボタンを押すとそのまま質問できます。");
   }
 
+  // 画面の準備ができたときに、boot() から1回だけ呼ばれる。
+  // **API を呼ぶ処理は、ここから呼ぶ。**これより前は apiBase() の宛先がまだ決まっていない。
+  function onReady() {
+    greet();
+    loadSuggestions();
+    showWhereItRuns();
+  }
+
 
   async function showWhereItRuns() {
     try {
-      const res = await fetch("/healthz");
+      const res = await fetch(`${apiBase()}/healthz`);
       const h = await res.json();
       window.runningAt = `${h.env} / ${h.student_id}`;
       document.getElementById("subtitle").textContent = window.runningAt;
@@ -605,9 +617,8 @@
       // 読めなくても画面は動かす
     }
   }
-  showWhereItRuns();
 
-  // **greet() を直接呼ばない。**ログインの確認が済んでから boot() が呼ぶ
+  // **onReady() を直接呼ばない。**ログインの確認が済んでから boot() が呼ぶ
   boot();
 </script>
 </body>
