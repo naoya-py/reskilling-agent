@@ -80,4 +80,14 @@ class Settings(BaseSettings):
     mcp_cache_seconds: int = 300
 
 
+    # ---- ログイン（第4回で有効になる）------------------------------------
+    # 手元（uvicorn）では False のまま。ログインせずに画面を触れる。
+    # AWS にデプロイすると template.yaml が True を渡すので、ログインが要るようになる
+    require_auth: bool = False
+
+    # Cognito の2つ。**手では入れない。**template.yaml が Lambda の環境変数で渡す
+    cognito_user_pool_id: str = ""
+    cognito_client_id: str = ""
+
+
 settings = Settings()
