@@ -7,3 +7,6 @@ __pycache__/
 venv/
 .pytest_cache/
 .DS_Store
+
+# sam build の成果物。受講者の PC の絶対パスが入るので追跡しない
+.aws-sam/
