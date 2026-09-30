@@ -10,7 +10,7 @@
 FROM --platform=linux/amd64 python:3.13-slim
 
 # ↓ この1行が Lambda Web Adapter。/opt/extensions に置くと Lambda が拡張として起動する
-COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.0 /lambda-adapter /opt/extensions/lambda-adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.0-x86_64 /lambda-adapter /opt/extensions/lambda-adapter
 
 # Python の出力をバッファせずそのまま標準出力へ流す（ログが即座に CloudWatch に出る）
 ENV PYTHONUNBUFFERED=1 \

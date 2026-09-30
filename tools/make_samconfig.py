@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""samconfig.toml を作る（第4回 03-デプロイ手順書 2-3）。
+r"""samconfig.toml を作る（第4回 03-デプロイ手順書 2-3）。
 
     py ..\answers\tools\make_samconfig.py yamada-2610       # Windows
     python3 ../answers/tools/make_samconfig.py yamada-2610   # Mac
@@ -63,13 +63,16 @@ confirm_changeset = false
 s3_bucket = "{bucket}"
 s3_prefix = "{student}-agent"
 image_repositories = ["AgentFunction={ecr}"]
-parameter_overrides = "StudentId={student}"
-tags = "Project=reskilling Owner={student}"
+parameter_overrides = "StudentId={student} PermissionsBoundaryArn=arn:aws:iam::{account}:policy/reskilling-student-boundary"
+# **StudentId のタグは消さないこと。** CloudFront と Cognito は名前で絞れないので、
+# 「自分のものか」をこのタグで確かめている。無いと作成が拒否される
+tags = "Project=reskilling Owner={student} StudentId={student}"
 """
     path = Path("samconfig.toml")
     path.write_text(body, encoding="utf-8")
     print(f"書きました: {path.resolve()}")
     print(f"  スタック名  : {student}-agent")
+    print(f"  権限境界    : reskilling-student-boundary")
     print(f"  イメージ先  : {ecr}")
     print(f"  作業用 S3   : {bucket}")
     print("次は 03 の 2-4（sam build）へ")

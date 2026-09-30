@@ -10,6 +10,7 @@ FastAPI のふつうのウェブアプリ。第4回で Docker に入れて AWS L
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, HTTPException
