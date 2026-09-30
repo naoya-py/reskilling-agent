@@ -63,7 +63,13 @@ confirm_changeset = false
 s3_bucket = "{bucket}"
 s3_prefix = "{student}-agent"
 image_repositories = ["AgentFunction={ecr}"]
-parameter_overrides = "StudentId={student} PermissionsBoundaryArn=arn:aws:iam::{account}:policy/reskilling-student-boundary"
+parameter_overrides = [
+  "StudentId={student}",
+  # 画面の上に出す名前。**ここを書き換えて sam deploy すると、コードを触らずに画面が変わる**（第4回 03 の 2-11）。
+  # 空白を含むので、値は引用符で囲む。囲みを外すと空白の手前で切れる
+  "AppName=\\"AI実践研修 エージェント\\"",
+  "PermissionsBoundaryArn=arn:aws:iam::{account}:policy/reskilling-student-boundary",
+]
 # **StudentId のタグは消さないこと。** CloudFront と Cognito は名前で絞れないので、
 # 「自分のものか」をこのタグで確かめている。無いと作成が拒否される
 tags = "Project=reskilling Owner={student} StudentId={student}"
@@ -75,6 +81,7 @@ tags = "Project=reskilling Owner={student} StudentId={student}"
     print(f"  権限境界    : reskilling-student-boundary")
     print(f"  イメージ先  : {ecr}")
     print(f"  作業用 S3   : {bucket}")
+    print(f"  画面の名前  : AI実践研修 エージェント（samconfig.toml の AppName で変えられる）")
     print("次は 03 の 2-4（sam build）へ")
     return 0
 
