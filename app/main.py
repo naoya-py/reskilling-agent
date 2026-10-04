@@ -10,6 +10,7 @@ FastAPI のふつうのウェブアプリ。第4回で Docker に入れて AWS L
 
 import logging
 from pathlib import Path
+
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -92,6 +93,7 @@ def index() -> str:
         "</body></html>"
     )
 
+
 @app.get("/config.json", include_in_schema=False)
 def config() -> dict:
     """画面が「いま手元か、AWS か」を見分けるための設定。
@@ -108,7 +110,8 @@ def config() -> dict:
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest, user: dict[str, Any] = Depends(current_user)) -> ChatResponse:
     """これまでの会話を読み、エージェントを回して答えを返し、会話を保存する。"""
-    logger.info("chat request received", extra={"extra_fields": {"chars": len(req.message), "session_id": req.session_id, "user": user.get("sub", "")}})
+    logger.info("chat request received", extra={"extra_fields": {
+        "chars": len(req.message), "session_id": req.session_id, "user": user.get("sub", "")}})
 
     # 1. 読む。CONVERSATION_TABLE が空なら [] が返る
     past = history.load(req.session_id)
