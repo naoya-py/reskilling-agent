@@ -78,10 +78,10 @@ tags = "Project=reskilling Owner={student} StudentId={student}"
     path.write_text(body, encoding="utf-8")
     print(f"書きました: {path.resolve()}")
     print(f"  スタック名  : {student}-agent")
-    print(f"  権限境界    : reskilling-student-boundary")
+    print("  権限境界    : reskilling-student-boundary")
     print(f"  イメージ先  : {ecr}")
     print(f"  作業用 S3   : {bucket}")
-    print(f"  画面の名前  : AI実践研修 エージェント（samconfig.toml の AppName で変えられる）")
+    print("  画面の名前  : AI実践研修 エージェント（samconfig.toml の AppName で変えられる）")
     print("次は 03 の 2-4（sam build）へ")
     return 0
 
