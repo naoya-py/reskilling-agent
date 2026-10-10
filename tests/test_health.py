@@ -51,6 +51,8 @@ def test_index_returns_html():
 def test_chat_returns_turns_and_tools(monkeypatch):
     """ターン数と tool の名前が画面に返ること。第6回まで turns は 1 固定だった。"""
     monkeypatch.setattr("app.main.run_agent", fake_run_agent)
+    monkeypatch.setattr(history, "load", lambda session_id, user_id=history.ANONYMOUS: [])
+    monkeypatch.setattr(history, "save", lambda session_id, messages, user_id=history.ANONYMOUS: None)
     res = client.post("/api/chat", json={"message": "いま何時？"})
     assert res.status_code == 200
     body = res.json()
