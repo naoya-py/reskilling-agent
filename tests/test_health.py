@@ -6,6 +6,7 @@ tool の往復を含む会話が丸ごと保存されること。
 第8回で2件増えて 11 件になる。MCP サーバーにも繋ぎにいかない（mcp_client を偽物に差し替える）。
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import history, mcp_client
@@ -13,6 +14,19 @@ from app.main import app
 from app.tools import all_tool_specs, run_tool
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def no_dynamodb(monkeypatch):
+    """どのテストも DynamoDB に読み書きしない。
+
+    .env に CONVERSATION_TABLE が入っていると、history.load() は本物の表を読む。
+    放っておくとテストを回すたびに session "default" の履歴が積み上がり、
+    history_messages が 0 でなくなる。
+    履歴の中身が要るテストは、この上からもう一度差し替える。
+    """
+    monkeypatch.setattr(history, "load", lambda session_id, user_id=history.ANONYMOUS: [])
+    monkeypatch.setattr(history, "save", lambda session_id, messages, user_id=history.ANONYMOUS: None)
 
 
 def fake_run_agent(message: str, past: list | None = None) -> dict:
