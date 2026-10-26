@@ -35,7 +35,7 @@ def main() -> int:
             capture_output=True, text=True, check=True,
         ).stdout
     except FileNotFoundError:
-        print("aws コマンドが見つかりません。04 の 2-1 を先に済ませ、ターミナルを開き直してください（T-11）")
+        print("aws コマンドが見つかりません。04 の 2-1 を先に済ませ、ターミナルを開き直してください（T-51）")
         return 1
     except subprocess.CalledProcessError as e:
         print("aws sts get-caller-identity が失敗しました。04 の 2-2〜2-3 を確認してください（T-12）")

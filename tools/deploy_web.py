@@ -40,7 +40,7 @@ def aws(*args: str) -> str:
     try:
         r = subprocess.run(["aws", *args], capture_output=True, text=True, check=True)
     except FileNotFoundError:
-        print("aws コマンドが見つかりません。04 の 2-1 を先に済ませ、ターミナルを開き直してください（T-11）")
+        print("aws コマンドが見つかりません。04 の 2-1 を先に済ませ、ターミナルを開き直してください（T-51）")
         sys.exit(1)
     except subprocess.CalledProcessError as e:
         print("aws コマンドが失敗しました:", " ".join(args[:3]))
